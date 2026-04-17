@@ -176,20 +176,73 @@ def alert(msg, type_="blue", icon="ℹ"):
     </div>""", unsafe_allow_html=True)
 
 # ── Data Loader ───────────────────────────────────────────────────────────────
-def _fix_xlsx_bytes(file_bytes):
-    import zipfile, re
-    VALID_VERT = {b"top", b"center", b"bottom", b"justify", b"distributed"}
+def _col_to_idx(col_str):
+    idx = 0
+    for c in col_str:
+        idx = idx * 26 + (ord(c.upper()) - ord('A') + 1)
+    return idx - 1
+
+def _parse_sheet_xml(sheet_bytes):
+    """
+    Pure-Python xlsx sheet parser.
+    Handles inlineStr cells (no sharedStrings.xml needed).
+    Returns a pd.DataFrame with no header applied.
+    """
+    import re as _re
+    rows_xml = _re.findall(rb'<row\b[^>]*>(.*?)</row>', sheet_bytes, _re.DOTALL)
+    all_rows = {}
+    max_col  = 0
+
+    for row_xml in rows_xml:
+        cells = _re.findall(rb'<c\b([^>]*?)>(.*?)</c>', row_xml, _re.DOTALL)
+        for attrs, content in cells:
+            ref_m = _re.search(rb'r="([A-Z]+)(\d+)"', attrs)
+            if not ref_m:
+                continue
+            col_i = _col_to_idx(ref_m.group(1).decode())
+            row_i = int(ref_m.group(2)) - 1
+            max_col = max(max_col, col_i)
+
+            is_val = _re.search(rb'<is><t[^>]*>(.*?)</t></is>', content, _re.DOTALL)
+            v_val  = _re.search(rb'<v>(.*?)</v>', content)
+
+            if is_val:
+                val = is_val.group(1).decode('utf-8', 'replace')
+            elif v_val:
+                raw_v = v_val.group(1).decode('utf-8', 'replace')
+                try:
+                    val = float(raw_v) if '.' in raw_v else int(raw_v)
+                except Exception:
+                    val = raw_v
+            else:
+                val = ''
+
+            all_rows.setdefault(row_i, {})[col_i] = val
+
+    n_rows = max(all_rows.keys()) + 1 if all_rows else 0
+    n_cols = max_col + 1
+    matrix = [
+        [all_rows.get(ri, {}).get(ci, '') for ci in range(n_cols)]
+        for ri in range(n_rows)
+    ]
+    return pd.DataFrame(matrix)
+
+
+def _fix_and_read_openpyxl(file_bytes):
+    """Rewrite xl/styles.xml to fix invalid alignment values, then read with openpyxl."""
+    import zipfile, re as _re
+
+    VALID_VERT  = {b"top", b"center", b"bottom", b"justify", b"distributed"}
     VALID_HORIZ = {b"general", b"left", b"center", b"right", b"fill",
                    b"justify", b"centerContinuous", b"distributed"}
 
     def fix_attr(xml, attr, valid, fallback):
-        pattern = re.compile(rb'(' + attr + rb'=")([^"]*?)(")')
-        def replacer(m):
-            val = m.group(2)
-            if val in valid:
-                return m.group(0)
-            return m.group(1) + fallback + m.group(3)
-        return pattern.sub(replacer, xml)
+        pat = _re.compile(rb'(' + attr + rb'=")([^"]*?)(")')
+        return pat.sub(
+            lambda m: m.group(0) if m.group(2) in valid
+                      else m.group(1) + fallback + m.group(3),
+            xml
+        )
 
     buf_out = BytesIO()
     with zipfile.ZipFile(BytesIO(file_bytes), "r") as zin, \
@@ -200,35 +253,60 @@ def _fix_xlsx_bytes(file_bytes):
                 data = fix_attr(data, b"vertical",   VALID_VERT,  b"bottom")
                 data = fix_attr(data, b"horizontal",  VALID_HORIZ, b"general")
             zout.writestr(item.filename, data)
+
     buf_out.seek(0)
-    return buf_out.read()
+    return pd.read_excel(buf_out, engine="openpyxl", header=0)
 
 
 def _read_excel_robust(file_bytes):
-    # 1. calamine
+    """
+    Multi-strategy Excel reader — ordered so the most reliable runs first.
+    Strategy 1: Pure-Python stdlib XML (zero deps, always works for .xlsx)
+    Strategy 2: calamine (fastest, immune to stylesheet bugs)
+    Strategy 3: openpyxl after repairing corrupt xl/styles.xml
+    Strategy 4: openpyxl raw
+    Strategy 5: xlrd (legacy .xls)
+    """
+    import zipfile
+
+    # ── 1. Pure-Python stdlib XML — works on ANY Python, zero dependencies ──
+    try:
+        with zipfile.ZipFile(BytesIO(file_bytes)) as z:
+            names = [i.filename for i in z.infolist()]
+            if "xl/worksheets/sheet1.xml" in names:
+                sheet_bytes = z.read("xl/worksheets/sheet1.xml")
+                df = _parse_sheet_xml(sheet_bytes)
+                if len(df) > 1:   # sanity check: got actual rows
+                    return df
+    except Exception:
+        pass
+
+    # ── 2. calamine ────────────────────────────────────────────────────────
     try:
         import python_calamine  # noqa
         return pd.read_excel(BytesIO(file_bytes), engine="calamine", header=0)
     except Exception:
         pass
-    # 2. Fix xlsx zip then openpyxl
+
+    # ── 3. openpyxl after styles.xml repair ────────────────────────────────
     try:
-        fixed = _fix_xlsx_bytes(file_bytes)
-        return pd.read_excel(BytesIO(fixed), engine="openpyxl", header=0)
+        return _fix_and_read_openpyxl(file_bytes)
     except Exception:
         pass
-    # 3. openpyxl raw
+
+    # ── 4. openpyxl raw ────────────────────────────────────────────────────
     try:
         return pd.read_excel(BytesIO(file_bytes), engine="openpyxl", header=0)
     except Exception:
         pass
-    # 4. xlrd
+
+    # ── 5. xlrd (legacy .xls) ──────────────────────────────────────────────
     try:
         return pd.read_excel(BytesIO(file_bytes), engine="xlrd", header=0)
     except Exception as e:
         raise RuntimeError(
-            "Could not read the uploaded file. Please open it in Excel, "
-            "do File \u2192 Save As \u2192 .xlsx, and re-upload. "
+            "Could not read the uploaded file. "
+            "Please open it in Excel → File → Save As → .xlsx and re-upload. "
             f"Detail: {e}"
         )
 
@@ -237,26 +315,39 @@ def _read_excel_robust(file_bytes):
 @st.cache_data
 def load_data(file_bytes):
     df_raw = _read_excel_robust(file_bytes)
-    header_row = 0
+
+    # Find the real header row — search first 5 rows for "Order status"
+    header_row = None
     for i in range(min(5, len(df_raw))):
-        if "Order status" in df_raw.iloc[i].values:
-            header_row = i; break
-    if header_row > 0:
-        df = df_raw.iloc[header_row+1:].copy()
-        df.columns = df_raw.iloc[header_row].tolist()
-    else:
-        first = df_raw.iloc[0]
-        if "Order status" in first.values:
-            df = df_raw.iloc[1:].copy(); df.columns = first.tolist()
-        else:
-            df = df_raw.copy()
+        row_vals = [str(v) for v in df_raw.iloc[i].values]
+        if "Order status" in row_vals:
+            header_row = i
+            break
+
+    if header_row is None:
+        # Last resort: use row 0 as header
+        header_row = 0
+
+    df = df_raw.iloc[header_row + 1:].copy()
+    df.columns = [str(c) for c in df_raw.iloc[header_row].tolist()]
     df.reset_index(drop=True, inplace=True)
+
+    # Strip any completely empty rows
+    df = df.dropna(how="all").reset_index(drop=True)
+
     for col in NUMERIC_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     for col in DATE_COLS:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    if "Restaurant name" not in df.columns:
+        raise RuntimeError(
+            "Uploaded file does not appear to be a Talabat order report. "
+            "Expected column 'Restaurant name' not found."
+        )
+
     df["_area"] = df["Restaurant name"].apply(get_area)
     df["_date"] = df["Order received at"].dt.date
     df["_hour"] = df["Order received at"].dt.hour
