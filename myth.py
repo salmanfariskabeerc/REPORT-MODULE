@@ -312,6 +312,52 @@ def _read_excel_robust(file_bytes):
 
 
 
+def _style_df(df, heat_col=None, heat_col2=None, reverse=False):
+    """Apply inline bar-style highlighting without matplotlib."""
+    def bar_color(val, col_vals, color):
+        try:
+            mn, mx = col_vals.min(), col_vals.max()
+            if mx == mn:
+                pct = 50
+            else:
+                pct = (val - mn) / (mx - mn) * 100
+            if reverse:
+                pct = 100 - pct
+            return f"background: linear-gradient(90deg, {color} {pct:.0f}%, transparent {pct:.0f}%); color: #0f172a;"
+        except Exception:
+            return ""
+
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    if heat_col and heat_col in df.columns:
+        col_vals = pd.to_numeric(df[heat_col], errors="coerce").fillna(0)
+        styles[heat_col] = col_vals.apply(lambda v: bar_color(v, col_vals, "rgba(249,115,22,0.25)"))
+    if heat_col2 and heat_col2 in df.columns:
+        col_vals2 = pd.to_numeric(df[heat_col2], errors="coerce").fillna(0)
+        styles[heat_col2] = col_vals2.apply(lambda v: bar_color(v, col_vals2, "rgba(239,68,68,0.25)"))
+    return df.style.apply(lambda _: styles, axis=None)
+
+
+def _style_df_full(df, color="rgba(249,115,22,0.25)"):
+    """Highlight every numeric column as a heatmap row."""
+    def row_style(row):
+        styles = []
+        for col in df.columns:
+            try:
+                col_vals = pd.to_numeric(df[col], errors="coerce").dropna()
+                v = pd.to_numeric(row[col], errors="coerce")
+                if col_vals.empty or pd.isna(v):
+                    styles.append("")
+                    continue
+                mn, mx = col_vals.min(), col_vals.max()
+                pct = 0 if mx == mn else (v - mn) / (mx - mn) * 100
+                styles.append(f"background: linear-gradient(90deg, {color} {pct:.0f}%, transparent {pct:.0f}%); color: #0f172a;")
+            except Exception:
+                styles.append("")
+        return styles
+    return df.style.apply(row_style, axis=1)
+
+
+
 @st.cache_data
 def load_data(file_bytes):
     df_raw = _read_excel_robust(file_bytes)
@@ -935,8 +981,7 @@ def main():
         dg.columns=["Date","Total","Delivered","Cancelled","GMV (AED)"]
         dg["Cancel %"]=dg.apply(lambda r:round(safe_div(r["Cancelled"],r["Total"],pct=True),1),axis=1)
         dg["GMV (AED)"]=dg["GMV (AED)"].round(0)
-        st.dataframe(dg.style.background_gradient(subset=["GMV (AED)"],cmap="Oranges")
-                              .background_gradient(subset=["Cancel %"],cmap="Reds"),
+        st.dataframe(_style_df(dg, heat_col="GMV (AED)", heat_col2="Cancel %"),
                      use_container_width=True,hide_index=True)
 
         st.markdown('<div class="section-label">Key Insights</div>', unsafe_allow_html=True)
@@ -994,7 +1039,7 @@ def main():
             ds.columns=["Date","Total","Delivered","Cancelled","GMV (AED)","Payout (AED)"]
             ds["Cancel %"]=ds.apply(lambda r:round(safe_div(r["Cancelled"],r["Total"],pct=True),1),axis=1)
             ds["GMV (AED)"]=ds["GMV (AED)"].round(0); ds["Payout (AED)"]=ds["Payout (AED)"].round(0)
-            st.dataframe(ds.style.background_gradient(subset=["GMV (AED)"],cmap="Oranges"),
+            st.dataframe(_style_df(ds, heat_col="GMV (AED)"),
                          use_container_width=True,hide_index=True)
         with c2:
             st.markdown('<div class="section-label">Financial Breakdown</div>',unsafe_allow_html=True)
@@ -1020,14 +1065,14 @@ def main():
             st.markdown('<div class="section-label">Hourly Order Pattern</div>',unsafe_allow_html=True)
             h=sub_df.groupby("_hour")["Order ID"].count().reset_index()
             h.columns=["Hour","Orders"]; h["Hour"]=h["Hour"].apply(lambda x:f"{x:02d}:00")
-            st.dataframe(h.style.background_gradient(subset=["Orders"],cmap="Oranges"),
+            st.dataframe(_style_df(h, heat_col="Orders"),
                          use_container_width=True,hide_index=True)
         with c2:
             st.markdown('<div class="section-label">Day of Week Pattern</div>',unsafe_allow_html=True)
             dow_order=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
             dw=sub_df.groupby("_dow")["Order ID"].count().reindex(dow_order).reset_index()
             dw.columns=["Day","Orders"]; dw["Orders"]=dw["Orders"].fillna(0).astype(int)
-            st.dataframe(dw.style.background_gradient(subset=["Orders"],cmap="Oranges"),
+            st.dataframe(_style_df(dw, heat_col="Orders"),
                          use_container_width=True,hide_index=True)
 
     # ── Tab 3: Sales ───────────────────────────────────────────────────────
@@ -1046,21 +1091,20 @@ def main():
                 "Pro %":round(safe_div(len(sd[sd["Is Pro Order"]=="Y"]),len(sd),pct=True),1),
                 "Online %":round(safe_div(len(sd[sd["Payment type"]=="Online"]),len(sd),pct=True),1)})
         rev_df=pd.DataFrame(rev).sort_values("GMV (AED)",ascending=False)
-        st.dataframe(rev_df.style.background_gradient(subset=["GMV (AED)"],cmap="Oranges")
-                              .background_gradient(subset=["Avg Order"],cmap="Blues"),
+        st.dataframe(_style_df(rev_df, heat_col="GMV (AED)", heat_col2="Avg Order"),
                      use_container_width=True,hide_index=True)
 
         c1,c2=st.columns(2)
         with c1:
             st.markdown('<div class="section-label">GMV by Outlet by Day</div>',unsafe_allow_html=True)
             gp=delivered.groupby(["_date","_area"])["Subtotal"].sum().unstack(fill_value=0).round(0)
-            st.dataframe(gp.style.background_gradient(cmap="Oranges",axis=None),use_container_width=True)
+            st.dataframe(_style_df_full(gp),use_container_width=True)
         with c2:
             st.markdown('<div class="section-label">Day-of-Week Pattern</div>',unsafe_allow_html=True)
             dow_order=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
             dw=df.groupby("_dow").agg(Orders=("Order ID","count"),GMV=("Subtotal","sum")).reindex(dow_order).reset_index()
             dw.columns=["Day","Total Orders","GMV (AED)"]; dw["GMV (AED)"]=dw["GMV (AED)"].round(0)
-            st.dataframe(dw.style.background_gradient(subset=["Total Orders"],cmap="Oranges"),
+            st.dataframe(_style_df(dw, heat_col="Total Orders"),
                          use_container_width=True,hide_index=True)
 
         st.markdown('<div class="section-label">Payment Mix by Outlet</div>',unsafe_allow_html=True)
@@ -1090,8 +1134,7 @@ def main():
                 "Fraudulent":int(sc["Cancellation reason"].str.contains("Fraudulent",na=False).sum()),
                 "Lost GMV (AED)":round(sc["Subtotal"].sum(),0)})
         can_df=pd.DataFrame(can).sort_values("Cancel Rate %",ascending=False)
-        st.dataframe(can_df.style.background_gradient(subset=["Cancel Rate %"],cmap="Reds")
-                               .background_gradient(subset=["Lost GMV (AED)"],cmap="Oranges"),
+        st.dataframe(_style_df(can_df, heat_col="Lost GMV (AED)", heat_col2="Cancel Rate %"),
                      use_container_width=True,hide_index=True)
         st.markdown('<div class="section-label">Outlet Alerts</div>',unsafe_allow_html=True)
         for _,r in can_df.iterrows():
@@ -1127,7 +1170,7 @@ def main():
                 "Min (min)":round(tot.min(),1) if len(tot)>0 else None,
                 "Deliveries":len(tot)})
         tm_df=pd.DataFrame(tm).sort_values("Avg Total (min)")
-        st.dataframe(tm_df.style.background_gradient(subset=["Avg Total (min)"],cmap="RdYlGn_r"),
+        st.dataframe(_style_df(tm_df, heat_col="Avg Total (min)", reverse=True),
                      use_container_width=True,hide_index=True)
         st.markdown('<div class="section-label">Timing Alerts</div>',unsafe_allow_html=True)
         for _,r in tm_df.iterrows():
@@ -1149,13 +1192,13 @@ def main():
                     "Online Fee":round(sd["Online Payment Fee"].sum(),0),
                     "Total Cost":round(tc,0),"Cost/Order":round(safe_div(tc,len(sd)),1)})
             st.dataframe(pd.DataFrame(op).sort_values("Total Cost",ascending=False)
-                           .style.background_gradient(subset=["Total Cost"],cmap="Oranges"),
+                           ,
                          use_container_width=True,hide_index=True)
         with c2:
             st.markdown('<div class="section-label">Hourly Demand Heatmap</div>',unsafe_allow_html=True)
             hp=df.groupby(["_hour","_area"])["Order ID"].count().unstack(fill_value=0)
             hp.index=[f"{h:02d}:00" for h in hp.index]
-            st.dataframe(hp.style.background_gradient(cmap="Oranges",axis=None),use_container_width=True)
+            st.dataframe(_style_df_full(hp),use_container_width=True)
         st.markdown('<div class="section-label">Complaint Analysis</div>',unsafe_allow_html=True)
         comp=[]
         for area in selected:
