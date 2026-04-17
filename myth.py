@@ -400,418 +400,381 @@ def load_data(file_bytes):
     df["_dow"]  = df["Order received at"].dt.day_name()
     return df
 
-# ── Excel Builder ─────────────────────────────────────────────────────────────
+# ── Excel Builder (xlsxwriter — pre-installed everywhere) ─────────────────────
 def build_excel(df):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
+    import xlsxwriter
+    buf = BytesIO()
+    wb  = xlsxwriter.Workbook(buf, {'in_memory': True})
 
-    wb = Workbook()
-    C_DARK="0F1117"; C_OR="F97316"; C_GR="10B981"; C_RE="EF4444"
-    C_BL="3B82F6"; C_PU="8B5CF6"; C_AM="F59E0B"
-    C_WH="FFFFFF"; C_LG="F8FAFC"; C_MG="E2E8F0"
-    OHEX={"Liwan":C_OR,"Dubai Investment Park":C_BL,"Oud Metha":C_PU,
-          "Naif":C_RE,"Al Muteena":C_GR,"Al Hamriya":C_AM}
+    def fmt(**kw):
+        base = {'font_name':'Calibri','font_size':9,'border':1,
+                'border_color':'#E2E8F0','valign':'vcenter'}
+        base.update(kw); return wb.add_format(base)
 
-    def fl(h): return PatternFill("solid",start_color=h,fgColor=h)
-    def fn(bold=False,size=9,color=C_DARK): return Font(bold=bold,size=size,color=color,name="Calibri")
-    def bd():
-        s=Side(style="thin",color=C_MG)
-        return Border(left=s,right=s,top=s,bottom=s)
-    def ct(): return Alignment(horizontal="center",vertical="center",wrap_text=True)
-    def lf(): return Alignment(horizontal="left",vertical="center")
-    def rg(): return Alignment(horizontal="right",vertical="center")
+    F_TITLE = fmt(bold=True,font_size=14,font_color='white',bg_color='#0F1117',align='center')
+    F_SEC   = fmt(bold=True,font_size=10,font_color='white',bg_color='#F97316',align='left')
+    F_SUB   = fmt(font_size=7,font_color='#94A3B8',bg_color='#F8FAFC',align='center',italic=True)
 
-    def title_row(ws,row,text,color=C_DARK,nc=14):
-        ws.merge_cells(start_row=row,start_column=1,end_row=row,end_column=nc)
-        c=ws.cell(row=row,column=1,value=text)
-        c.font=Font(bold=True,size=14,color=C_WH,name="Calibri")
-        c.fill=fl(color); c.alignment=ct(); ws.row_dimensions[row].height=28
-        return row+1
+    OUTLET_CLR = {
+        'Liwan':'#F97316','Dubai Investment Park':'#3B82F6',
+        'Oud Metha':'#8B5CF6','Naif':'#EF4444',
+        'Al Muteena':'#10B981','Al Hamriya':'#F59E0B',
+    }
 
-    def sec(ws,row,text,color=C_OR,nc=14):
-        ws.merge_cells(start_row=row,start_column=1,end_row=row,end_column=nc)
-        c=ws.cell(row=row,column=1,value=text)
-        c.font=Font(bold=True,size=10,color=C_WH,name="Calibri")
-        c.fill=fl(color); c.alignment=lf(); ws.row_dimensions[row].height=20
-        return row+1
+    def make_fmt(bold=False,size=8,fc='#0F1117',bg='#FFFFFF',align='left',italic=False,wrap=False):
+        return wb.add_format({'font_name':'Calibri','font_size':size,'bold':bold,
+            'font_color':fc,'bg_color':bg,'align':align,'valign':'vcenter',
+            'border':1,'border_color':'#E2E8F0','italic':italic,'text_wrap':wrap})
 
-    def hdr(ws,row,headers,color=C_OR,widths=None):
-        for ci,h in enumerate(headers,1):
-            c=ws.cell(row=row,column=ci,value=h)
-            c.font=fn(bold=True,size=8,color=C_WH); c.fill=fl(color)
-            c.alignment=ct(); c.border=bd()
-            if widths and ci-1<len(widths):
-                ws.column_dimensions[get_column_letter(ci)].width=widths[ci-1]
-        return row+1
+    def write_title(ws, row, text, ncols=14, color='#0F1117'):
+        ws.merge_range(row,0,row,ncols-1, text,
+            make_fmt(bold=True,size=14,fc='white',bg=color,align='center'))
+        ws.set_row(row,28); return row+1
 
-    def rows(ws,row,data,nums=None):
+    def write_sec(ws, row, text, ncols=14, color='#F97316'):
+        ws.merge_range(row,0,row,ncols-1, text,
+            make_fmt(bold=True,size=10,fc='white',bg=color,align='left'))
+        ws.set_row(row,20); return row+1
+
+    def write_hdr(ws, row, headers, color='#F97316', widths=None):
+        hf = make_fmt(bold=True,size=8,fc='white',bg=color,align='center',wrap=True)
+        for ci,h in enumerate(headers):
+            ws.write(row,ci,h,hf)
+            if widths and ci<len(widths): ws.set_column(ci,ci,widths[ci])
+        ws.set_row(row,22); return row+1
+
+    def write_rows(ws, start_row, data, num_cols=None):
         for ri,rd in enumerate(data):
-            bg=C_LG if ri%2==0 else C_WH
-            for ci,val in enumerate(rd,1):
-                c=ws.cell(row=row+ri,column=ci,value=val)
-                c.font=fn(size=8); c.fill=fl(bg); c.border=bd()
-                c.alignment=rg() if (nums and ci in nums) else lf()
-        return row+len(data)+1
+            bg = '#F8FAFC' if ri%2==0 else '#FFFFFF'
+            cf  = make_fmt(size=8,bg=bg,align='left')
+            cnf = make_fmt(size=8,bg=bg,align='right')
+            for ci,val in enumerate(rd):
+                f = cnf if (num_cols and ci in num_cols) else cf
+                ws.write(start_row+ri,ci,val,f)
+        return start_row+len(data)+1
 
-    outlets_all = sorted(df["_area"].unique())
-    delivered = df[df["Order status"]=="Delivered"]
-    cancelled = df[df["Order status"]=="Cancelled"]
-    date_min = df["Order received at"].min()
-    date_max = df["Order received at"].max()
+    outlets_all = sorted(df['_area'].unique())
+    delivered   = df[df['Order status']=='Delivered']
+    cancelled   = df[df['Order status']=='Cancelled']
+    date_min    = df['Order received at'].min()
+    date_max    = df['Order received at'].max()
 
     outlet_data = []
     for area in outlets_all:
-        s = df[df["_area"]==area]
-        if len(s)>0:
-            outlet_data.append((area, s["Restaurant name"].iloc[0], outlet_metrics(s)))
-    outlet_data.sort(key=lambda x: x[2]["gmv"], reverse=True)
+        s = df[df['_area']==area]
+        if len(s)>0: outlet_data.append((area,s['Restaurant name'].iloc[0],outlet_metrics(s)))
+    outlet_data.sort(key=lambda x: x[2]['gmv'], reverse=True)
 
     # SHEET 1: Group Summary
-    ws = wb.active; ws.title="Group Summary"; ws.sheet_view.showGridLines=False
-    row = title_row(ws,1,"AL MADINA HYPERMARKET  ·  GROUP PERFORMANCE REPORT",C_DARK)
-    ws.merge_cells("A2:N2")
-    s2=ws["A2"]
-    s2.value=f"Period: {date_min.strftime('%d %b %Y') if pd.notna(date_min) else '—'} – {date_max.strftime('%d %b %Y') if pd.notna(date_max) else '—'}   |   {len(outlet_data)} Outlets   |   Generated: {datetime.now().strftime('%d %b %Y %H:%M')}"
-    s2.font=Font(size=8,color="94A3B8",name="Calibri",italic=True)
-    s2.fill=fl(C_LG); s2.alignment=ct(); ws.row_dimensions[2].height=14
-    row=4
-    m=outlet_metrics(df)
-    row=sec(ws,row,"  GROUP KEY METRICS",C_DARK)
-    hdr(ws,row,["Metric","Value","Metric","Value","Metric","Value"],C_DARK,[22,16,22,16,22,16])
-    row+=1
-    krows=[
-        ["Total Orders",m["total"],"Delivered",f"{m['delivered']} ({m['del_rate']:.1f}%)","Cancelled",f"{m['cancelled']} ({m['can_rate']:.1f}%)"],
-        ["Gross Revenue (GMV)",f"AED {m['gmv']:,.0f}","Total Payout",f"AED {m['payout']:,.0f}","Commission",f"AED {m['commission']:,.0f}"],
-        ["Avg Order Value",f"AED {m['avg_order']:,.1f}","Avg Delivery",f"{m['del_time']} min" if m['del_time'] else "N/A","Complaints",f"{m['complaints']} ({m['complaint_rate']:.1f}%)"],
-        ["Online Orders %",f"{m['online_pct']:.0f}%","Pro Orders %",f"{m['pro_pct']:.0f}%","Lost to Cancellations",f"AED {m['lost_gmv']:,.0f}"],
-    ]
-    for ri,rd in enumerate(krows):
-        bg=C_LG if ri%2==0 else C_WH
-        for ci,val in enumerate(rd,1):
-            c=ws.cell(row=row+ri,column=ci,value=val)
-            is_lbl=ci%2==1
-            c.font=Font(bold=is_lbl,size=9,color=C_OR if is_lbl else C_DARK,name="Calibri")
-            c.fill=fl(bg); c.alignment=lf(); c.border=bd()
-    row+=len(krows)+2
+    ws = wb.add_worksheet('Group Summary'); ws.hide_gridlines(2)
+    row = write_title(ws,0,'AL MADINA HYPERMARKET  -  GROUP PERFORMANCE REPORT')
+    ds = ''
+    if pd.notna(date_min) and pd.notna(date_max):
+        ds = date_min.strftime('%d %b %Y')+' - '+date_max.strftime('%d %b %Y')
+    ws.merge_range(row,0,row,13,
+        'Period: '+ds+'   |   '+str(len(outlet_data))+' Outlets   |   Generated: '+datetime.now().strftime('%d %b %Y %H:%M'),
+        make_fmt(size=7,fc='#94A3B8',bg='#F8FAFC',align='center',italic=True))
+    ws.set_row(row,14); row+=2
 
-    row=sec(ws,row,"  OUTLET LEAGUE TABLE (sorted by GMV)",C_OR)
-    hdr_cols=["Rank","Outlet","Area","Orders","Delivered","Cancelled","Cancel %","GMV (AED)","Payout (AED)","Commission","Avg Order","Del Time","Complaints","Pro %"]
-    hdr(ws,row,hdr_cols,C_OR,[6,26,22,8,10,10,10,14,14,12,11,11,11,10])
-    row+=1
+    m = outlet_metrics(df)
+    row = write_sec(ws,row,'  GROUP KEY METRICS',color='#0F1117')
+    krow_data = [
+        ['Total Orders',m['total'],'Delivered',str(m['delivered'])+' ('+str(round(m['del_rate'],1))+'%)','Cancelled',str(m['cancelled'])+' ('+str(round(m['can_rate'],1))+'%)'],
+        ['Gross Revenue','AED '+'{:,.0f}'.format(m['gmv']),'Total Payout','AED '+'{:,.0f}'.format(m['payout']),'Commission','AED '+'{:,.0f}'.format(m['commission'])],
+        ['Avg Order Value','AED '+'{:,.1f}'.format(m['avg_order']),'Avg Delivery',(str(m['del_time'])+' min') if m['del_time'] else 'N/A','Complaints',str(m['complaints'])+' ('+str(round(m['complaint_rate'],1))+'%)'],
+        ['Online Pay %',str(round(m['online_pct'],0))+'%','Pro Orders %',str(round(m['pro_pct'],0))+'%','Lost to Cancels','AED '+'{:,.0f}'.format(m['lost_gmv'])],
+    ]
+    for ri,rd in enumerate(krow_data):
+        bg = '#F8FAFC' if ri%2==0 else '#FFFFFF'
+        for ci,val in enumerate(rd):
+            is_lbl = ci%2==0
+            ws.write(row+ri,ci,val,make_fmt(bold=is_lbl,size=9,
+                fc='#F97316' if is_lbl else '#0F1117',bg=bg,align='left'))
+    row += len(krow_data)+2
+
+    row = write_sec(ws,row,'  OUTLET LEAGUE TABLE (sorted by GMV)')
+    row = write_hdr(ws,row,['Rank','Outlet','Area','Orders','Delivered','Cancelled',
+        'Cancel %','GMV (AED)','Payout (AED)','Commission','Avg Order','Del Time','Complaints','Pro %'],
+        widths=[6,26,22,8,10,10,10,14,14,12,11,11,11,10])
     tbl_rows=[]
     for rank,(area,fname,om) in enumerate(outlet_data,1):
-        tbl_rows.append([rank,fname,area,om["total"],om["delivered"],om["cancelled"],
-            f"{om['can_rate']:.1f}%",f"{om['gmv']:,.0f}",f"{om['payout']:,.0f}",
-            f"{om['commission']:,.0f}",f"{om['avg_order']:,.1f}",
-            f"{om['del_time']:.0f}" if om['del_time'] else "N/A",
-            om["complaints"],f"{om['pro_pct']:.0f}%"])
-    rows(ws,row,tbl_rows,{4,5,6,8,9,10,11,12})
-    row+=len(tbl_rows)+2
+        tbl_rows.append([rank,fname,area,om['total'],om['delivered'],om['cancelled'],
+            '{:.1f}%'.format(om['can_rate']),'{:,.0f}'.format(om['gmv']),
+            '{:,.0f}'.format(om['payout']),'{:,.0f}'.format(om['commission']),
+            '{:,.1f}'.format(om['avg_order']),
+            '{:.0f}'.format(om['del_time']) if om['del_time'] else 'N/A',
+            om['complaints'],'{:.0f}%'.format(om['pro_pct'])])
+    row=write_rows(ws,row,tbl_rows,num_cols={3,4,5,7,8,9,10,11}); row+=1
 
-    row=sec(ws,row,"  DAILY GROUP TREND",C_BL)
-    hdr(ws,row,["Date","Total","Delivered","Cancelled","Cancel %","GMV (AED)","Payout (AED)"],C_BL,[14,10,12,12,12,14,14])
-    row+=1
-    dg=df.groupby("_date").agg(total=("Order ID","count"),
-        delivered=("Order status",lambda x:(x=="Delivered").sum()),
-        cancelled=("Order status",lambda x:(x=="Cancelled").sum()),
-        gmv=("Subtotal","sum")).reset_index()
-    dp=delivered.groupby(delivered["_date"])["Payout Amount"].sum().reset_index()
-    dp.columns=["_date","payout"]; dg=dg.merge(dp,on="_date",how="left").fillna(0)
-    dg["can_pct"]=dg.apply(lambda r:safe_div(r["cancelled"],r["total"],pct=True),axis=1)
-    dr=[[str(r["_date"]),int(r["total"]),int(r["delivered"]),int(r["cancelled"]),
-         f"{r['can_pct']:.1f}%",f"{r['gmv']:,.0f}",f"{r['payout']:,.0f}"] for _,r in dg.iterrows()]
-    rows(ws,row,dr,{2,3,4,6,7})
-    ws.freeze_panes="A5"
+    row=write_sec(ws,row,'  DAILY GROUP TREND',color='#3B82F6')
+    dg=df.groupby('_date').agg(total=('Order ID','count'),
+        delivered=('Order status',lambda x:(x=='Delivered').sum()),
+        cancelled=('Order status',lambda x:(x=='Cancelled').sum()),
+        gmv=('Subtotal','sum')).reset_index()
+    dp=delivered.groupby(delivered['_date'])['Payout Amount'].sum().reset_index()
+    dp.columns=['_date','payout']; dg=dg.merge(dp,on='_date',how='left').fillna(0)
+    dg['can_pct']=dg.apply(lambda r:safe_div(r['cancelled'],r['total'],pct=True),axis=1)
+    row=write_hdr(ws,row,['Date','Total','Delivered','Cancelled','Cancel %','GMV (AED)','Payout (AED)'],
+        color='#3B82F6',widths=[14,10,12,12,12,14,14])
+    dr=[[str(r['_date']),int(r['total']),int(r['delivered']),int(r['cancelled']),
+         '{:.1f}%'.format(r['can_pct']),'{:,.0f}'.format(r['gmv']),'{:,.0f}'.format(r['payout'])]
+        for _,r in dg.iterrows()]
+    write_rows(ws,row,dr,num_cols={1,2,3,5,6}); ws.freeze_panes(4,0)
 
     # SHEET 2: Outlet Comparison
-    ws2=wb.create_sheet("Outlet Comparison"); ws2.sheet_view.showGridLines=False
-    row=title_row(ws2,1,"OUTLET COMPARISON MATRIX",C_OR); row+=1
-    row=sec(ws2,row,"  METRIC VS METRIC",C_OR)
-    ws2.cell(row=row,column=1,value="Metric").font=Font(bold=True,size=8,color=C_WH,name="Calibri")
-    ws2.cell(row=row,column=1).fill=fl(C_OR)
-    ws2.cell(row=row,column=1).border=bd()
-    ws2.column_dimensions["A"].width=26
-    for ci,(area,_,_) in enumerate(outlet_data,2):
-        c=ws2.cell(row=row,column=ci,value=area)
-        c.font=Font(bold=True,size=8,color=C_WH,name="Calibri")
-        c.fill=fl(OHEX.get(area,C_OR)); c.alignment=ct(); c.border=bd()
-        ws2.column_dimensions[get_column_letter(ci)].width=18
+    ws2=wb.add_worksheet('Outlet Comparison'); ws2.hide_gridlines(2)
+    row=write_title(ws2,0,'OUTLET COMPARISON MATRIX',color='#F97316'); row+=1
+    row=write_sec(ws2,row,'  METRIC VS METRIC')
+    ws2.write(row,0,'Metric',make_fmt(bold=True,size=8,fc='white',bg='#F97316',align='center'))
+    ws2.set_column(0,0,26)
+    for ci,(area,_,_) in enumerate(outlet_data,1):
+        c=OUTLET_CLR.get(area,'#F97316')
+        ws2.write(row,ci,area,make_fmt(bold=True,size=8,fc='white',bg=c,align='center'))
+        ws2.set_column(ci,ci,18)
     row+=1
     metrics_list=[
-        ("Total Orders","total"),("Delivered","delivered"),("Cancelled","cancelled"),
-        ("Cancellation Rate %","can_rate"),("GMV (AED)","gmv"),("Payout (AED)","payout"),
-        ("Commission (AED)","commission"),("Op Charges (AED)","op_charges"),
-        ("Avg Order Value","avg_order"),("Avg Delivery Time","del_time"),
-        ("Avg Prep Time","prep_time"),("Avg Last Mile","last_mile"),
-        ("Pro Order %","pro_pct"),("Online Payment %","online_pct"),
-        ("Complaints","complaints"),("Complaint Rate %","complaint_rate"),
-        ("Lost GMV (Cancels)","lost_gmv"),
+        ('Total Orders','total'),('Delivered','delivered'),('Cancelled','cancelled'),
+        ('Cancellation Rate %','can_rate'),('GMV (AED)','gmv'),('Payout (AED)','payout'),
+        ('Commission (AED)','commission'),('Op Charges (AED)','op_charges'),
+        ('Avg Order Value','avg_order'),('Avg Delivery (min)','del_time'),
+        ('Avg Prep (min)','prep_time'),('Avg Last Mile (min)','last_mile'),
+        ('Pro Order %','pro_pct'),('Online Payment %','online_pct'),
+        ('Complaints','complaints'),('Complaint Rate %','complaint_rate'),
+        ('Lost GMV (Cancels)','lost_gmv'),
     ]
     for ri,(label,key) in enumerate(metrics_list):
-        bg=C_LG if ri%2==0 else C_WH
-        lc=ws2.cell(row=row+ri,column=1,value=label)
-        lc.font=fn(bold=True,size=8); lc.fill=fl(bg); lc.alignment=lf(); lc.border=bd()
-        for ci,(_,_,om) in enumerate(outlet_data,2):
+        bg='#F8FAFC' if ri%2==0 else '#FFFFFF'
+        ws2.write(row+ri,0,label,make_fmt(bold=True,size=8,bg=bg,align='left'))
+        for ci,(_,_,om) in enumerate(outlet_data,1):
             val=om.get(key,0) or 0
-            if key in("can_rate","del_rate","pro_pct","online_pct","complaint_rate"): disp=f"{val:.1f}%"
-            elif key in("gmv","payout","commission","op_charges","avg_order","lost_gmv"): disp=f"{val:,.0f}"
-            elif key in("del_time","prep_time","last_mile"): disp=f"{val:.0f} min" if val else "N/A"
+            if key in('can_rate','del_rate','pro_pct','online_pct','complaint_rate'): disp='{:.1f}%'.format(val)
+            elif key in('gmv','payout','commission','op_charges','avg_order','lost_gmv'): disp='{:,.0f}'.format(val)
+            elif key in('del_time','prep_time','last_mile'): disp='{:.0f} min'.format(val) if val else 'N/A'
             else: disp=str(int(val)) if isinstance(val,float) else str(val)
-            vc=ws2.cell(row=row+ri,column=ci,value=disp)
-            vc.font=fn(size=8); vc.fill=fl(bg); vc.alignment=rg(); vc.border=bd()
+            ws2.write(row+ri,ci,disp,make_fmt(size=8,bg=bg,align='right'))
     row+=len(metrics_list)+2
-
-    row=sec(ws2,row,"  CANCELLATION BREAKDOWN BY OUTLET",C_RE)
-    hdr(ws2,row,["Outlet","Cancelled","Vendor","Customer","Rider","Platform","Item N/A","Fraudulent","Other","Lost GMV (AED)"],
-        C_RE,[22,10,10,10,10,10,12,12,12,16])
-    row+=1
+    row=write_sec(ws2,row,'  CANCELLATION BREAKDOWN',color='#EF4444')
+    row=write_hdr(ws2,row,['Outlet','Cancelled','Vendor','Customer','Rider',
+        'Item N/A','Fraudulent','Other','Lost GMV (AED)'],
+        color='#EF4444',widths=[22,14,10,10,10,14,12,12,16])
     can_r=[]
     for area,_,_ in outlet_data:
-        sc=cancelled[cancelled["_area"]==area]
-        owners=sc["Cancellation owner"].value_counts()
-        can_r.append([area,len(sc),
-            owners.get("Vendor",0),owners.get("Customer",0),owners.get("Rider",0),
-            int(sc["Cancellation owner"].str.strip().eq("Platform").sum()),
-            int(sc["Cancellation reason"].str.contains("Item not available",na=False).sum()),
-            int(sc["Cancellation reason"].str.contains("Fraudulent",na=False).sum()),
-            len(sc)-int(sc["Cancellation reason"].str.contains("Item not available|Fraudulent",na=False).sum()),
-            f"{sc['Subtotal'].sum():,.0f}"])
-    rows(ws2,row,can_r,{2,3,4,5,6,7,8,9,10})
+        sc=cancelled[cancelled['_area']==area]
+        ow=sc['Cancellation owner'].value_counts()
+        can_r.append([area,len(sc),int(ow.get('Vendor',0)),int(ow.get('Customer',0)),
+            int(ow.get('Rider',0)),
+            int(sc['Cancellation reason'].str.contains('Item not available',na=False).sum()),
+            int(sc['Cancellation reason'].str.contains('Fraudulent',na=False).sum()),
+            len(sc)-int(sc['Cancellation reason'].str.contains('Item not available|Fraudulent',na=False).sum()),
+            '{:,.0f}'.format(sc['Subtotal'].sum())])
+    write_rows(ws2,row,can_r,num_cols={1,2,3,4,5,6,7,8})
 
-    # SHEETS 3+: Per outlet
+    # Per-outlet sheets
     for area,fname,om in outlet_data:
-        safe_t=area[:28]; ws_o=wb.create_sheet(safe_t)
-        ws_o.sheet_view.showGridLines=False
-        color=OHEX.get(area,C_OR)
-        row=title_row(ws_o,1,f"OUTLET REPORT  ·  {area.upper()}",color)
-        ws_o.merge_cells("A2:N2"); s2=ws_o["A2"]
-        s2.value=f"{fname}   |   {date_min.strftime('%d %b') if pd.notna(date_min) else '?'} – {date_max.strftime('%d %b %Y') if pd.notna(date_max) else '?'}"
-        s2.font=Font(size=8,color="94A3B8",name="Calibri",italic=True)
-        s2.fill=fl(C_LG); s2.alignment=lf(); ws_o.row_dimensions[2].height=14
-        row=4
-        sub_df=df[df["_area"]==area]; sub_d=sub_df[sub_df["Order status"]=="Delivered"]
-        sub_c=sub_df[sub_df["Order status"]=="Cancelled"]
-        row=sec(ws_o,row,"  KEY METRICS",color)
-        kd=[["Total Orders",om["total"],"Delivered",f"{om['delivered']} ({om['del_rate']:.1f}%)","Cancelled",f"{om['cancelled']} ({om['can_rate']:.1f}%)"],
-            ["GMV",f"AED {om['gmv']:,.0f}","Payout",f"AED {om['payout']:,.0f}","Commission",f"AED {om['commission']:,.0f}"],
-            ["Avg Order",f"AED {om['avg_order']:,.1f}","Avg Delivery",f"{om['del_time']:.0f} min" if om['del_time'] else "N/A","Avg Prep",f"{om['prep_time']:.0f} min" if om['prep_time'] else "N/A"],
-            ["Pro Orders",f"{om['pro_pct']:.0f}%","Online Payments",f"{om['online_pct']:.0f}%","Complaints",f"{om['complaints']} ({om['complaint_rate']:.1f}%)"]]
+        color=OUTLET_CLR.get(area,'#F97316')
+        ws_o=wb.add_worksheet(area[:28]); ws_o.hide_gridlines(2)
+        row=write_title(ws_o,0,'OUTLET REPORT  -  '+area.upper(),color=color)
+        ws_o.merge_range(row,0,row,13,fname,make_fmt(size=7,fc='#94A3B8',bg='#F8FAFC',align='left',italic=True))
+        ws_o.set_row(row,14); row+=2
+        sub_df=df[df['_area']==area]; sub_d=sub_df[sub_df['Order status']=='Delivered']
+        sub_c=sub_df[sub_df['Order status']=='Cancelled']
+        row=write_sec(ws_o,row,'  KEY METRICS',color=color)
+        kd=[
+            ['Total Orders',om['total'],'Delivered',str(om['delivered'])+' ('+str(round(om['del_rate'],1))+'%)','Cancelled',str(om['cancelled'])+' ('+str(round(om['can_rate'],1))+'%)'],
+            ['GMV','AED '+'{:,.0f}'.format(om['gmv']),'Payout','AED '+'{:,.0f}'.format(om['payout']),'Commission','AED '+'{:,.0f}'.format(om['commission'])],
+            ['Avg Order','AED '+'{:,.1f}'.format(om['avg_order']),'Avg Delivery',('{:.0f} min'.format(om['del_time'])) if om['del_time'] else 'N/A','Avg Prep',('{:.0f} min'.format(om['prep_time'])) if om['prep_time'] else 'N/A'],
+            ['Pro Orders','{:.0f}%'.format(om['pro_pct']),'Online Pay','{:.0f}%'.format(om['online_pct']),'Complaints',str(om['complaints'])+' ('+str(round(om['complaint_rate'],1))+'%)'],
+        ]
         for ri,rd in enumerate(kd):
-            bg=C_LG if ri%2==0 else C_WH
-            for ci,val in enumerate(rd,1):
-                c=ws_o.cell(row=row+ri,column=ci,value=val)
-                is_lbl=ci%2==1
-                c.font=Font(bold=is_lbl,size=9,color=color if is_lbl else C_DARK,name="Calibri")
-                c.fill=fl(bg); c.alignment=lf(); c.border=bd()
+            bg='#F8FAFC' if ri%2==0 else '#FFFFFF'
+            for ci,val in enumerate(rd):
+                is_lbl=ci%2==0
+                ws_o.write(row+ri,ci,val,make_fmt(bold=is_lbl,size=9,
+                    fc=color if is_lbl else '#0F1117',bg=bg,align='left'))
         row+=len(kd)+2
-        row=sec(ws_o,row,"  DAILY PERFORMANCE",color)
-        hdr(ws_o,row,["Date","Total","Delivered","Cancelled","Cancel %","GMV (AED)","Payout (AED)"],color,[14,10,12,12,12,14,14])
-        row+=1
-        ds=sub_df.groupby("_date").agg(total=("Order ID","count"),
-            delivered=("Order status",lambda x:(x=="Delivered").sum()),
-            cancelled=("Order status",lambda x:(x=="Cancelled").sum()),
-            gmv=("Subtotal","sum")).reset_index()
-        dp2=sub_d.groupby(sub_d["_date"])["Payout Amount"].sum().reset_index()
-        dp2.columns=["_date","payout"]; ds=ds.merge(dp2,on="_date",how="left").fillna(0)
-        ds["can_pct"]=ds.apply(lambda r:safe_div(r["cancelled"],r["total"],pct=True),axis=1)
-        dr2=[[str(r["_date"]),int(r["total"]),int(r["delivered"]),int(r["cancelled"]),
-              f"{r['can_pct']:.1f}%",f"{r['gmv']:,.0f}",f"{r['payout']:,.0f}"] for _,r in ds.iterrows()]
-        rows(ws_o,row,dr2,{2,3,4,6,7}); row+=len(dr2)+2
+        row=write_sec(ws_o,row,'  DAILY PERFORMANCE',color=color)
+        ds2=sub_df.groupby('_date').agg(total=('Order ID','count'),
+            delivered=('Order status',lambda x:(x=='Delivered').sum()),
+            cancelled=('Order status',lambda x:(x=='Cancelled').sum()),
+            gmv=('Subtotal','sum')).reset_index()
+        dp2=sub_d.groupby(sub_d['_date'])['Payout Amount'].sum().reset_index()
+        dp2.columns=['_date','payout']; ds2=ds2.merge(dp2,on='_date',how='left').fillna(0)
+        ds2['can_pct']=ds2.apply(lambda r:safe_div(r['cancelled'],r['total'],pct=True),axis=1)
+        row=write_hdr(ws_o,row,['Date','Total','Delivered','Cancelled','Cancel %','GMV (AED)','Payout (AED)'],
+            color=color,widths=[14,10,12,12,12,14,14])
+        dr2=[[str(r['_date']),int(r['total']),int(r['delivered']),int(r['cancelled']),
+              '{:.1f}%'.format(r['can_pct']),'{:,.0f}'.format(r['gmv']),'{:,.0f}'.format(r['payout'])]
+             for _,r in ds2.iterrows()]
+        row=write_rows(ws_o,row,dr2,num_cols={1,2,3,5,6}); row+=1
         if len(sub_c)>0:
-            row=sec(ws_o,row,"  CANCELLATION DETAIL",C_RE)
-            hdr(ws_o,row,["Reason","Count","Owner","Lost GMV (AED)"],C_RE,[36,10,18,16])
-            row+=1
-            cd=sub_c.groupby(["Cancellation reason","Cancellation owner"]).agg(
-                Count=("Order ID","count"),Lost=("Subtotal","sum")).reset_index().sort_values("Count",ascending=False)
-            cdr=[[str(r["Cancellation reason"]),int(r["Count"]),str(r["Cancellation owner"]).strip(),f"{r['Lost']:,.0f}"] for _,r in cd.iterrows()]
-            rows(ws_o,row,cdr,{2,4}); row+=len(cdr)+2
-        row=sec(ws_o,row,"  FINANCIAL BREAKDOWN",color)
-        hdr(ws_o,row,["Item","Total (AED)","Per Order","% of GMV"],color,[30,16,14,13])
-        row+=1
-        fin=[(l,v) for l,v in [("GMV",om["gmv"]),("Commission",om["commission"]),
-            ("Op Charges",om["op_charges"]),("Online Fee",om["online_fee"]),
-            ("Total Payout",om["payout"])]]
-        rows(ws_o,row,[[l,f"{v:,.2f}",f"{safe_div(v,om['delivered']):,.2f}",
-            f"{safe_div(v,om['gmv'],pct=True):.1f}%"] for l,v in fin],{2,3,4})
-        row=sec(ws_o,row+len(fin)+2,"  HOURLY ORDER PATTERN",color)
-        hdr(ws_o,row,["Hour","Orders","Hour","Orders","Hour","Orders"],color,[10,10,10,10,10,10])
-        row+=1
-        hourly=sub_df.groupby("_hour")["Order ID"].count().reset_index().values.tolist()
-        hr_rows=[]
-        for i in range(0,len(hourly),3):
-            trio=hourly[i:i+3]
-            rv=[]
-            for h,c_v in trio: rv+=[f"{int(h):02d}:00",int(c_v)]
-            while len(rv)<6: rv+=["",""]
-            hr_rows.append(rv)
-        rows(ws_o,row,hr_rows,{2,4,6})
+            row=write_sec(ws_o,row,'  CANCELLATION DETAIL',color='#EF4444')
+            row=write_hdr(ws_o,row,['Reason','Count','Owner','Lost GMV (AED)'],
+                color='#EF4444',widths=[36,10,18,16])
+            cd=sub_c.groupby(['Cancellation reason','Cancellation owner']).agg(
+                Count=('Order ID','count'),Lost=('Subtotal','sum')).reset_index().sort_values('Count',ascending=False)
+            cdr=[[str(r['Cancellation reason']),int(r['Count']),
+                  str(r['Cancellation owner']).strip(),'{:,.0f}'.format(r['Lost'])] for _,r in cd.iterrows()]
+            row=write_rows(ws_o,row,cdr,num_cols={1,3}); row+=1
+        row=write_sec(ws_o,row,'  FINANCIAL BREAKDOWN',color=color)
+        row=write_hdr(ws_o,row,['Item','Total (AED)','Per Order','% of GMV'],
+            color=color,widths=[30,16,14,13])
+        fin=[('GMV',om['gmv']),('Commission',om['commission']),
+             ('Op Charges',om['op_charges']),('Online Fee',om['online_fee']),
+             ('Total Payout',om['payout'])]
+        write_rows(ws_o,row,[[l,'{:,.2f}'.format(v),'{:,.2f}'.format(safe_div(v,om['delivered'])),
+            '{:.1f}%'.format(safe_div(v,om['gmv'],pct=True))] for l,v in fin],num_cols={1,2,3})
 
-    # Raw Data
-    ws_r=wb.create_sheet("Raw Data"); ws_r.sheet_view.showGridLines=False
-    rc=[c for c in df.columns if not c.startswith("_")]
+    # Raw data
+    ws_r=wb.add_worksheet('Raw Data'); ws_r.hide_gridlines(2)
+    rc=[c for c in df.columns if not c.startswith('_')]
     rdf=df[rc]
-    for ci,col in enumerate(rdf.columns,1):
-        c=ws_r.cell(row=1,column=ci,value=col)
-        c.font=fn(bold=True,size=7,color=C_WH); c.fill=fl(C_DARK); c.alignment=ct()
-        ws_r.column_dimensions[get_column_letter(ci)].width=max(len(str(col))+2,10)
-    for ri,rd in enumerate(rdf.itertuples(index=False),2):
-        bg=C_LG if ri%2==0 else C_WH
-        for ci,val in enumerate(rd,1):
-            c=ws_r.cell(row=ri,column=ci,value=str(val) if pd.notna(val) else "")
-            c.font=fn(size=7); c.fill=fl(bg)
+    hf_raw=make_fmt(bold=True,size=7,fc='white',bg='#0F1117',align='center')
+    for ci,col in enumerate(rdf.columns):
+        ws_r.write(0,ci,col,hf_raw)
+        ws_r.set_column(ci,ci,max(len(str(col))+2,10))
+    cf0=make_fmt(size=7,bg='#F8FAFC',align='left')
+    cf1=make_fmt(size=7,bg='#FFFFFF',align='left')
+    for ri,row_data in enumerate(rdf.itertuples(index=False),1):
+        f=cf0 if ri%2==0 else cf1
+        for ci,val in enumerate(row_data):
+            ws_r.write(ri,ci,'' if pd.isna(val) else str(val),f)
 
-    buf=BytesIO(); wb.save(buf); buf.seek(0); return buf.read()
+    wb.close(); buf.seek(0); return buf.read()
 
-# ── PDF Builder ───────────────────────────────────────────────────────────────
+
+# ── HTML Report Builder (zero dependencies) ───────────────────────────────────
 def build_pdf(df):
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,PageBreak
-    from reportlab.lib.enums import TA_CENTER,TA_LEFT
+    outlets_all=sorted(df['_area'].unique())
+    delivered=df[df['Order status']=='Delivered']
+    cancelled=df[df['Order status']=='Cancelled']
+    date_min=df['Order received at'].min()
+    date_max=df['Order received at'].max()
+    m=outlet_metrics(df)
+    outlet_data=[(a,outlet_metrics(df[df['_area']==a])) for a in outlets_all if len(df[df['_area']==a])>0]
+    outlet_data.sort(key=lambda x:x[1]['gmv'],reverse=True)
+    CLRS={'Liwan':'#F97316','Dubai Investment Park':'#3B82F6','Oud Metha':'#8B5CF6',
+          'Naif':'#EF4444','Al Muteena':'#10B981','Al Hamriya':'#F59E0B'}
 
-    buf=BytesIO()
-    doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=1.5*cm,leftMargin=1.5*cm,
-                          topMargin=1.5*cm,bottomMargin=1.5*cm)
-    CD=colors.HexColor("#0F1117"); COR=colors.HexColor("#F97316")
-    CGR=colors.HexColor("#10B981"); CRE=colors.HexColor("#EF4444")
-    CBL=colors.HexColor("#3B82F6"); CWH=colors.white
-    CLG=colors.HexColor("#F8FAFC")
-    OCLR={"Liwan":COR,"Dubai Investment Park":CBL,"Oud Metha":colors.HexColor("#8B5CF6"),
-          "Naif":CRE,"Al Muteena":CGR,"Al Hamriya":colors.HexColor("#F59E0B")}
+    CSS = """<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,sans-serif;color:#1a1a2e;background:#f8fafc;padding:24px;}
+.page{background:white;border-radius:12px;padding:28px;margin-bottom:24px;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+h1{font-size:20px;}
+.sec{padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;margin:16px 0 8px;color:white;}
+table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+th{padding:7px 10px;text-align:left;font-size:11px;color:white;}
+td{padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;}
+tr:nth-child(even) td{background:#f8fafc;}
+.kgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;}
+.kcard{background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;border-top:3px solid #f97316;}
+.klabel{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;}
+.kvalue{font-size:20px;font-weight:700;color:#0f172a;margin-top:4px;}
+.ksub{font-size:11px;color:#64748b;margin-top:2px;}
+@media print{body{background:white;padding:0;}.page{box-shadow:none;page-break-after:always;}}
+</style>"""
 
-    ts=ParagraphStyle("ts",fontSize=16,textColor=CWH,alignment=TA_CENTER,fontName="Helvetica-Bold",spaceAfter=4)
-    sm=ParagraphStyle("sm",fontSize=7.5,textColor=colors.grey,fontName="Helvetica",alignment=TA_CENTER)
-    W=17.5*cm
+    def tbl(headers, rows, color='#F97316'):
+        ths=''.join('<th style="background:'+color+';">'+str(h)+'</th>' for h in headers)
+        trs=''
+        for i,r in enumerate(rows):
+            bg='#f8fafc' if i%2==0 else 'white'
+            tds=''.join('<td style="background:'+bg+';">'+str(v)+'</td>' for v in r)
+            trs+='<tr>'+tds+'</tr>'
+        return '<table><thead><tr>'+ths+'</tr></thead><tbody>'+trs+'</tbody></table>'
 
-    def ban(txt,color=CD):
-        d=[[Paragraph(txt,ts)]]; t=Table(d,colWidths=[W])
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),color),
-            ("TOPPADDING",(0,0),(-1,-1),12),("BOTTOMPADDING",(0,0),(-1,-1),12)])); return t
+    def kcard(label,value,sub='',color='#F97316'):
+        s='<div class="ksub">'+sub+'</div>' if sub else ''
+        return ('<div class="kcard" style="border-top-color:'+color+';">'
+                '<div class="klabel">'+label+'</div>'
+                '<div class="kvalue">'+str(value)+'</div>'+s+'</div>')
 
-    def sec_b(txt,color=COR):
-        d=[[Paragraph(txt,ParagraphStyle("sb",fontSize=9,textColor=CWH,fontName="Helvetica-Bold"))]]
-        t=Table(d,colWidths=[W])
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),color),
-            ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
-            ("LEFTPADDING",(0,0),(-1,-1),8)])); return t
+    def sec(title,color='#F97316'):
+        return '<div class="sec" style="background:'+color+';">'+title+'</div>'
 
-    def tbl(data,cw,hc=COR):
-        t=Table(data,colWidths=cw)
-        t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),hc),("TEXTCOLOR",(0,0),(-1,0),CWH),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7.5),
-            ("FONTNAME",(0,1),(-1,-1),"Helvetica"),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[CWH,CLG]),
-            ("ALIGN",(0,0),(-1,-1),"CENTER"),("ALIGN",(0,1),(0,-1),"LEFT"),
-            ("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#E2E8F0")),
-            ("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)])); return t
+    ds=''
+    if pd.notna(date_min) and pd.notna(date_max):
+        ds=date_min.strftime('%d %b %Y')+' - '+date_max.strftime('%d %b %Y')
 
-    story=[]; outlets_all=sorted(df["_area"].unique())
-    delivered=df[df["Order status"]=="Delivered"]; cancelled=df[df["Order status"]=="Cancelled"]
-    date_min=df["Order received at"].min(); date_max=df["Order received at"].max()
-    outlet_data=[(a,outlet_metrics(df[df["_area"]==a])) for a in outlets_all if len(df[df["_area"]==a])>0]
-    outlet_data.sort(key=lambda x:x[1]["gmv"],reverse=True)
-
-    story.append(ban("AL MADINA HYPERMARKET",CD)); story.append(Spacer(1,.15*cm))
-    story.append(ban("GROUP PERFORMANCE REPORT",COR)); story.append(Spacer(1,.15*cm))
-    ds="" 
-    if pd.notna(date_min) and pd.notna(date_max): ds=f"{date_min.strftime('%d %b %Y')} – {date_max.strftime('%d %b %Y')}"
-    story.append(Paragraph(f"Period: {ds}   |   {len(outlet_data)} Outlets   |   Generated: {datetime.now().strftime('%d %b %Y %H:%M')}",sm))
-    story.append(Spacer(1,.4*cm))
-
-    m=outlet_metrics(df); story.append(sec_b("GROUP KEY METRICS",CD)); story.append(Spacer(1,.1*cm))
-    kd=[["Total Orders","Delivered","Cancelled","Cancel Rate","Gross Revenue","Total Payout"],
-        [str(m["total"]),str(m["delivered"]),str(m["cancelled"]),f"{m['can_rate']:.1f}%",
-         f"AED {m['gmv']:,.0f}",f"AED {m['payout']:,.0f}"],
-        ["Avg Order","Commission","Avg Delivery","Pro Orders","Online Pay %","Complaints"],
-        [f"AED {m['avg_order']:,.1f}",f"AED {m['commission']:,.0f}",
-         f"{m['del_time']} min" if m['del_time'] else "N/A",
-         f"{m['pro_pct']:.0f}%",f"{m['online_pct']:.0f}%",str(m["complaints"])]]
-    kt=Table(kd,colWidths=[2.92*cm]*6)
-    kt.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),CD),("BACKGROUND",(0,2),(-1,2),CD),
-        ("TEXTCOLOR",(0,0),(-1,0),CWH),("TEXTCOLOR",(0,2),(-1,2),CWH),
-        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTNAME",(0,2),(-1,2),"Helvetica-Bold"),
-        ("FONTNAME",(0,1),(-1,1),"Helvetica"),("FONTNAME",(0,3),(-1,3),"Helvetica"),
-        ("FONTSIZE",(0,0),(-1,-1),8),("ALIGN",(0,0),(-1,-1),"CENTER"),
-        ("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#E2E8F0")),
-        ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
-    story.append(kt); story.append(Spacer(1,.3*cm))
-
-    story.append(sec_b("OUTLET LEAGUE TABLE  (by GMV)",COR)); story.append(Spacer(1,.1*cm))
-    lt=[["#","Outlet","Orders","Delivered","Cancel%","GMV (AED)","Payout","Avg Order","Del Time"]]
-    for rank,(area,om) in enumerate(outlet_data,1):
-        lt.append([str(rank),area,str(om["total"]),str(om["delivered"]),
-            f"{om['can_rate']:.1f}%",f"{om['gmv']:,.0f}",f"{om['payout']:,.0f}",
-            f"{om['avg_order']:,.1f}",f"{om['del_time']:.0f}m" if om['del_time'] else "N/A"])
-    ltt=tbl(lt,[.6*cm,3.5*cm,1.5*cm,1.8*cm,1.5*cm,2.2*cm,2.2*cm,1.8*cm,1.5*cm])
-    for i,(area,_) in enumerate(outlet_data):
-        ltt.setStyle(TableStyle([("BACKGROUND",(1,i+1),(1,i+1),OCLR.get(area,COR)),
-                                  ("TEXTCOLOR",(1,i+1),(1,i+1),CWH)]))
-    story.append(ltt); story.append(Spacer(1,.3*cm))
-
-    story.append(sec_b("DAILY GROUP TREND",CBL)); story.append(Spacer(1,.1*cm))
-    dg=df.groupby("_date").agg(total=("Order ID","count"),
-        delivered=("Order status",lambda x:(x=="Delivered").sum()),
-        cancelled=("Order status",lambda x:(x=="Cancelled").sum()),
-        gmv=("Subtotal","sum")).reset_index()
-    dg["can_pct"]=dg.apply(lambda r:safe_div(r["cancelled"],r["total"],pct=True),axis=1)
-    dt=[["Date","Total","Delivered","Cancelled","Cancel %","GMV (AED)"]]+\
-       [[str(r["_date"]),int(r["total"]),int(r["delivered"]),int(r["cancelled"]),
-         f"{r['can_pct']:.1f}%",f"{r['gmv']:,.0f}"] for _,r in dg.iterrows()]
-    story.append(tbl(dt,[3.5*cm,2.2*cm,2.2*cm,2.2*cm,2.5*cm,4.9*cm],CBL))
-    story.append(PageBreak())
+    html='<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Al Madina Report</title>'+CSS+'</head><body>'
+    html+='<div class="page">'
+    html+=('<div style="background:#1a1a2e;color:white;padding:20px 24px;border-radius:10px;margin-bottom:20px;">'
+           '<div style="font-size:12px;color:#f97316;font-weight:700;margin-bottom:4px;">AL MADINA HYPERMARKET</div>'
+           '<h1 style="color:white;">Group Performance Report</h1>'
+           '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Period: '+ds+' &nbsp;·&nbsp; '+str(len(outlet_data))+' Outlets &nbsp;·&nbsp; Generated: '+datetime.now().strftime('%d %b %Y %H:%M')+'</div>'
+           '</div>')
+    html+=sec('GROUP KEY METRICS','#1a1a2e')
+    html+='<div class="kgrid">'
+    html+=kcard('Total Orders',m['total'])
+    html+=kcard('Delivered',m['delivered'],'{:.1f}% rate'.format(m['del_rate']),'#10b981')
+    html+=kcard('Cancelled',m['cancelled'],'{:.1f}% rate'.format(m['can_rate']),'#ef4444')
+    html+=kcard('Gross Revenue','AED {:,.0f}'.format(m['gmv']),'','#3b82f6')
+    html+=kcard('Total Payout','AED {:,.0f}'.format(m['payout']),'','#8b5cf6')
+    html+=kcard('Avg Order','AED {:,.1f}'.format(m['avg_order']),'','#f97316')
+    html+=kcard('Commission','AED {:,.0f}'.format(m['commission']),'{:.1f}% of GMV'.format(safe_div(m['commission'],m['gmv'],pct=True)))
+    html+=kcard('Avg Delivery',('{:.0f} min'.format(m['del_time'])) if m['del_time'] else 'N/A')
+    html+=kcard('Pro Orders','{:.0f}%'.format(m['pro_pct']))
+    html+='</div>'
+    html+=sec('OUTLET LEAGUE TABLE')
+    html+=tbl(['#','Outlet','Orders','Delivered','Cancel %','GMV (AED)','Payout (AED)','Avg Order','Del Time'],
+        [[str(rank),area,str(om['total']),str(om['delivered']),'{:.1f}%'.format(om['can_rate']),
+          '{:,.0f}'.format(om['gmv']),'{:,.0f}'.format(om['payout']),'{:,.1f}'.format(om['avg_order']),
+          ('{:.0f} min'.format(om['del_time'])) if om['del_time'] else 'N/A']
+         for rank,(area,om) in enumerate(outlet_data,1)])
+    html+=sec('DAILY TREND','#3B82F6')
+    dg=df.groupby('_date').agg(total=('Order ID','count'),
+        delivered=('Order status',lambda x:(x=='Delivered').sum()),
+        cancelled=('Order status',lambda x:(x=='Cancelled').sum()),
+        gmv=('Subtotal','sum')).reset_index()
+    dg['can_pct']=dg.apply(lambda r:safe_div(r['cancelled'],r['total'],pct=True),axis=1)
+    html+=tbl(['Date','Total','Delivered','Cancelled','Cancel %','GMV (AED)'],
+        [[str(r['_date']),int(r['total']),int(r['delivered']),int(r['cancelled']),
+          '{:.1f}%'.format(r['can_pct']),'{:,.0f}'.format(r['gmv'])] for _,r in dg.iterrows()],'#3B82F6')
+    html+='</div>'
 
     for area,om in outlet_data:
-        color=OCLR.get(area,COR)
-        story.append(ban(f"OUTLET REPORT  ·  {area.upper()}",color)); story.append(Spacer(1,.2*cm))
-        sub_df=df[df["_area"]==area]; sub_c=sub_df[sub_df["Order status"]=="Cancelled"]
-        mk=[["Orders","Delivered","Cancelled","Cancel%","GMV","Avg Order","Del Time"],
-            [str(om["total"]),str(om["delivered"]),str(om["cancelled"]),
-             f"{om['can_rate']:.1f}%",f"AED {om['gmv']:,.0f}",
-             f"AED {om['avg_order']:,.1f}",f"{om['del_time']:.0f}m" if om['del_time'] else "N/A"]]
-        mkt=Table(mk,colWidths=[2.5*cm]*7)
-        mkt.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),color),("TEXTCOLOR",(0,0),(-1,0),CWH),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTNAME",(0,1),(-1,1),"Helvetica"),
-            ("FONTSIZE",(0,0),(-1,-1),8),("ALIGN",(0,0),(-1,-1),"CENTER"),
-            ("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#E2E8F0")),
-            ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
-        story.append(mkt); story.append(Spacer(1,.2*cm))
-        story.append(sec_b("Daily Performance",color)); story.append(Spacer(1,.08*cm))
-        ds2=sub_df.groupby("_date").agg(total=("Order ID","count"),
-            delivered=("Order status",lambda x:(x=="Delivered").sum()),
-            cancelled=("Order status",lambda x:(x=="Cancelled").sum()),
-            gmv=("Subtotal","sum")).reset_index()
-        ds2["can_pct"]=ds2.apply(lambda r:safe_div(r["cancelled"],r["total"],pct=True),axis=1)
-        dt2=[["Date","Total","Del","Can","Can%","GMV (AED)"]]+\
-            [[str(r["_date"]),int(r["total"]),int(r["delivered"]),int(r["cancelled"]),
-              f"{r['can_pct']:.1f}%",f"{r['gmv']:,.0f}"] for _,r in ds2.iterrows()]
-        story.append(tbl(dt2,[3.2*cm,1.8*cm,1.8*cm,1.8*cm,2*cm,7.9*cm],color)); story.append(Spacer(1,.2*cm))
+        color=CLRS.get(area,'#F97316')
+        sub_df=df[df['_area']==area]; sub_d=sub_df[sub_df['Order status']=='Delivered']
+        sub_c=sub_df[sub_df['Order status']=='Cancelled']
+        html+='<div class="page">'
+        html+=('<div style="background:'+color+';color:white;padding:14px 20px;border-radius:10px;margin-bottom:14px;">'
+               '<h1>'+area+'</h1></div>')
+        html+='<div class="kgrid">'
+        html+=kcard('Orders',om['total'],'',color)
+        html+=kcard('Delivered',om['delivered'],'{:.1f}%'.format(om['del_rate']),'#10b981')
+        html+=kcard('Cancelled',om['cancelled'],'{:.1f}%'.format(om['can_rate']),'#ef4444')
+        html+=kcard('GMV','AED {:,.0f}'.format(om['gmv']),'',color)
+        html+=kcard('Payout','AED {:,.0f}'.format(om['payout']),'','#8b5cf6')
+        html+=kcard('Avg Order','AED {:,.1f}'.format(om['avg_order']),'',color)
+        html+='</div>'
+        html+=sec('Daily Performance',color)
+        ds2=sub_df.groupby('_date').agg(total=('Order ID','count'),
+            delivered=('Order status',lambda x:(x=='Delivered').sum()),
+            cancelled=('Order status',lambda x:(x=='Cancelled').sum()),
+            gmv=('Subtotal','sum')).reset_index()
+        ds2['can_pct']=ds2.apply(lambda r:safe_div(r['cancelled'],r['total'],pct=True),axis=1)
+        html+=tbl(['Date','Total','Delivered','Cancelled','Cancel %','GMV (AED)'],
+            [[str(r['_date']),int(r['total']),int(r['delivered']),int(r['cancelled']),
+              '{:.1f}%'.format(r['can_pct']),'{:,.0f}'.format(r['gmv'])] for _,r in ds2.iterrows()],color)
         if len(sub_c)>0:
-            story.append(sec_b("Cancellations",CRE)); story.append(Spacer(1,.08*cm))
-            cg=sub_c.groupby(["Cancellation owner","Cancellation reason"]).agg(
-                Count=("Order ID","count"),Lost=("Subtotal","sum")).reset_index().sort_values("Count",ascending=False)
-            ch=[["Owner","Reason","Count","Lost (AED)"]]+\
-               [[str(r["Cancellation owner"]).strip(),str(r["Cancellation reason"])[:35],
-                 int(r["Count"]),f"{r['Lost']:,.0f}"] for _,r in cg.iterrows()]
-            story.append(tbl(ch,[2.5*cm,9*cm,1.8*cm,4.2*cm],CRE))
-        story.append(Spacer(1,.2*cm))
-        story.append(sec_b("Financial Breakdown",color)); story.append(Spacer(1,.08*cm))
-        sub_d=sub_df[sub_df["Order status"]=="Delivered"]
-        fh=[["Item","Total (AED)","Per Order","% of GMV"]]
-        fi=[("GMV",om["gmv"]),("Commission",om["commission"]),
-            ("Op Charges",om["op_charges"]),("Online Fee",om["online_fee"]),
-            ("Payout",om["payout"])]
-        fr=fh+[[l,f"{v:,.2f}",f"{safe_div(v,om['delivered']):,.2f}",
-                f"{safe_div(v,om['gmv'],pct=True):.1f}%"] for l,v in fi]
-        story.append(tbl(fr,[5*cm,4*cm,3.5*cm,5*cm],color))
-        story.append(PageBreak())
+            html+=sec('Cancellations','#EF4444')
+            cg=sub_c.groupby(['Cancellation owner','Cancellation reason']).agg(
+                Count=('Order ID','count'),Lost=('Subtotal','sum')).reset_index().sort_values('Count',ascending=False)
+            html+=tbl(['Owner','Reason','Count','Lost GMV (AED)'],
+                [[str(r['Cancellation owner']).strip(),str(r['Cancellation reason']),
+                  int(r['Count']),'{:,.0f}'.format(r['Lost'])] for _,r in cg.iterrows()],'#EF4444')
+        html+=sec('Financial Breakdown',color)
+        fin=[('GMV',om['gmv']),('Commission',om['commission']),
+             ('Op Charges',om['op_charges']),('Online Fee',om['online_fee']),('Payout',om['payout'])]
+        html+=tbl(['Item','Total (AED)','Per Order','% of GMV'],
+            [[l,'{:,.2f}'.format(v),'{:,.2f}'.format(safe_div(v,om['delivered'])),
+              '{:.1f}%'.format(safe_div(v,om['gmv'],pct=True))] for l,v in fin],color)
+        html+='</div>'
 
-    doc.build(story); buf.seek(0); return buf.read()
+    html+='</body></html>'
+    return html.encode('utf-8')
+
+
+
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
@@ -1244,8 +1207,8 @@ def main():
             st.markdown("""
             <div class="kpi-card blue" style="padding:22px;margin-bottom:14px;">
                 <div style="font-size:22px;margin-bottom:8px;">📄</div>
-                <div style="font-size:15px;font-weight:600;color:#0f172a;margin-bottom:6px;">PDF Report</div>
-                <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Print-ready management report for presentations and outlet manager distribution.</div>
+                <div style="font-size:15px;font-weight:600;color:#0f172a;margin-bottom:6px;">HTML Report (Print to PDF)</div>
+                <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Self-contained HTML report. Open in browser and print to PDF to share with management.</div>
                 <ul style="font-size:11px;color:#64748b;margin-left:14px;line-height:1.8;">
                     <li>Cover page + Group KPIs</li>
                     <li>Outlet league table</li>
@@ -1253,19 +1216,20 @@ def main():
                     <li>Per-outlet pages</li>
                 </ul>
             </div>""", unsafe_allow_html=True)
-            if st.button("📄 Generate & Download PDF", use_container_width=True, key="gen_pdf"):
+            if st.button("📄 Generate & Download HTML Report", use_container_width=True, key="gen_pdf"):
                 try:
-                    with st.spinner("Building PDF report..."):
-                        pdf_bytes = build_pdf(df)
+                    with st.spinner("Building report..."):
+                        html_bytes = build_pdf(df)
                     st.download_button(
-                        "💾 Click here to save PDF",
-                        data=pdf_bytes,
-                        file_name=f"AlMadina_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                        mime="application/pdf",
+                        "💾 Click here to save HTML Report",
+                        data=html_bytes,
+                        file_name="AlMadina_Report_"+datetime.now().strftime('%Y%m%d_%H%M')+".html",
+                        mime="text/html",
                         use_container_width=True,
                     )
+                    st.info("Open the downloaded .html file in any browser. Use File > Print > Save as PDF to get a PDF.", icon="💡")
                 except Exception as e:
-                    st.error(f"PDF build failed: {e}. Check that reportlab is in requirements.txt")
+                    st.error("HTML report build failed: "+str(e))
         st.divider()
         m=outlet_metrics(df)
         alert(f"Report covers <b>{len(selected)} outlets</b>, <b>{m['total']} orders</b> ({m['delivered']} delivered, {m['cancelled']} cancelled), <b>AED {m['gmv']:,.0f}</b> gross revenue — period <b>{date_min.strftime('%d %b') if pd.notna(date_min) else '?'} – {date_max.strftime('%d %b %Y') if pd.notna(date_max) else '?'}</b>.","blue","📋")
