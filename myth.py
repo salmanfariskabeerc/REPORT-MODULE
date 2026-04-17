@@ -176,60 +176,63 @@ def alert(msg, type_="blue", icon="ℹ"):
     </div>""", unsafe_allow_html=True)
 
 # ── Data Loader ───────────────────────────────────────────────────────────────
-def _read_excel_robust(file_bytes):
-    """Try every available engine until one works, patching openpyxl stylesheet bug."""
-    data = BytesIO(file_bytes)
+def _fix_xlsx_bytes(file_bytes):
+    import zipfile, re
+    VALID_VERT = {b"top", b"center", b"bottom", b"justify", b"distributed"}
+    VALID_HORIZ = {b"general", b"left", b"center", b"right", b"fill",
+                   b"justify", b"centerContinuous", b"distributed"}
 
-    # 1. calamine – fastest, no XML quirks
+    def fix_attr(xml, attr, valid, fallback):
+        pattern = re.compile(rb'(' + attr + rb'=")([^"]*?)(")')
+        def replacer(m):
+            val = m.group(2)
+            if val in valid:
+                return m.group(0)
+            return m.group(1) + fallback + m.group(3)
+        return pattern.sub(replacer, xml)
+
+    buf_in  = BytesIO(file_bytes)
+    buf_out = BytesIO()
+    with zipfile.ZipFile(buf_in, "r") as zin, \
+         zipfile.ZipFile(buf_out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.name)
+            if item.name == "xl/styles.xml":
+                data = fix_attr(data, b"vertical",   VALID_VERT,  b"bottom")
+                data = fix_attr(data, b"horizontal",  VALID_HORIZ, b"general")
+            zout.writestr(item, data)
+    buf_out.seek(0)
+    return buf_out.read()
+
+
+def _read_excel_robust(file_bytes):
+    # 1. calamine
     try:
         import python_calamine  # noqa
-        return pd.read_excel(data, engine="calamine", header=0)
+        return pd.read_excel(BytesIO(file_bytes), engine="calamine", header=0)
     except Exception:
         pass
-
-    # 2. openpyxl with stylesheet bug patched
-    OxlSet = None
-    _orig_set = None
+    # 2. Fix xlsx zip then openpyxl
     try:
-        import openpyxl
-        from openpyxl.descriptors.base import Set as OxlSet
-
-        _orig_set = OxlSet.__set__
-
-        def _safe_set(self, instance, value):
-            try:
-                _orig_set(self, instance, value)
-            except ValueError:
-                # Silently skip invalid enum values (e.g. bad "vertical" alignment)
-                pass
-
-        OxlSet.__set__ = _safe_set
-
-        data.seek(0)
-        df = pd.read_excel(data, engine="openpyxl", header=0)
-        OxlSet.__set__ = _orig_set  # restore
-        return df
-    except Exception:
-        if OxlSet is not None and _orig_set is not None:
-            OxlSet.__set__ = _orig_set  # always restore
-        pass
-
-    # 3. xlrd (for older .xls files)
-    try:
-        data.seek(0)
-        return pd.read_excel(data, engine="xlrd", header=0)
+        fixed = _fix_xlsx_bytes(file_bytes)
+        return pd.read_excel(BytesIO(fixed), engine="openpyxl", header=0)
     except Exception:
         pass
-
-    # 4. Last resort: odf
+    # 3. openpyxl raw
     try:
-        data.seek(0)
-        return pd.read_excel(data, engine="odf", header=0)
+        return pd.read_excel(BytesIO(file_bytes), engine="openpyxl", header=0)
+    except Exception:
+        pass
+    # 4. xlrd
+    try:
+        return pd.read_excel(BytesIO(file_bytes), engine="xlrd", header=0)
     except Exception as e:
         raise RuntimeError(
-            f"Could not read the uploaded file with any available engine. "
-            f"Please re-save the file as .xlsx from Excel and try again. Error: {e}"
+            "Could not read the uploaded file. Please open it in Excel, "
+            "do File \u2192 Save As \u2192 .xlsx, and re-upload. "
+            f"Detail: {e}"
         )
+
 
 
 @st.cache_data
