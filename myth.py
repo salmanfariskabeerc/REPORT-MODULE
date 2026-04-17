@@ -1227,12 +1227,19 @@ def main():
                     <li>Raw data sheet</li>
                 </ul>
             </div>""", unsafe_allow_html=True)
-            with st.spinner("Building Excel report..."):
-                excel_bytes=build_excel(df)
-            st.download_button("📥 Download Excel Report",data=excel_bytes,
-                file_name=f"AlMadina_Group_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,type="primary")
+            if st.button("📥 Generate & Download Excel", use_container_width=True, type="primary", key="gen_excel"):
+                try:
+                    with st.spinner("Building Excel report..."):
+                        excel_bytes = build_excel(df)
+                    st.download_button(
+                        "💾 Click here to save Excel",
+                        data=excel_bytes,
+                        file_name=f"AlMadina_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"Excel build failed: {e}. Check that openpyxl is in requirements.txt")
         with c2:
             st.markdown("""
             <div class="kpi-card blue" style="padding:22px;margin-bottom:14px;">
@@ -1246,11 +1253,19 @@ def main():
                     <li>Per-outlet pages</li>
                 </ul>
             </div>""", unsafe_allow_html=True)
-            with st.spinner("Building PDF report..."):
-                pdf_bytes=build_pdf(df)
-            st.download_button("📄 Download PDF Report",data=pdf_bytes,
-                file_name=f"AlMadina_Group_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",use_container_width=True)
+            if st.button("📄 Generate & Download PDF", use_container_width=True, key="gen_pdf"):
+                try:
+                    with st.spinner("Building PDF report..."):
+                        pdf_bytes = build_pdf(df)
+                    st.download_button(
+                        "💾 Click here to save PDF",
+                        data=pdf_bytes,
+                        file_name=f"AlMadina_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"PDF build failed: {e}. Check that reportlab is in requirements.txt")
         st.divider()
         m=outlet_metrics(df)
         alert(f"Report covers <b>{len(selected)} outlets</b>, <b>{m['total']} orders</b> ({m['delivered']} delivered, {m['cancelled']} cancelled), <b>AED {m['gmv']:,.0f}</b> gross revenue — period <b>{date_min.strftime('%d %b') if pd.notna(date_min) else '?'} – {date_max.strftime('%d %b %Y') if pd.notna(date_max) else '?'}</b>.","blue","📋")
