@@ -1,7 +1,6 @@
 streamlit
 pandas
-openpyxl
-reportlab
+xlsxwriter
 xlrd
 numpy
 python-calamine
