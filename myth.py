@@ -191,16 +191,15 @@ def _fix_xlsx_bytes(file_bytes):
             return m.group(1) + fallback + m.group(3)
         return pattern.sub(replacer, xml)
 
-    buf_in  = BytesIO(file_bytes)
     buf_out = BytesIO()
-    with zipfile.ZipFile(buf_in, "r") as zin, \
+    with zipfile.ZipFile(BytesIO(file_bytes), "r") as zin, \
          zipfile.ZipFile(buf_out, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
-            data = zin.read(item.name)
-            if item.name == "xl/styles.xml":
+            data = zin.read(item.filename)
+            if item.filename == "xl/styles.xml":
                 data = fix_attr(data, b"vertical",   VALID_VERT,  b"bottom")
                 data = fix_attr(data, b"horizontal",  VALID_HORIZ, b"general")
-            zout.writestr(item, data)
+            zout.writestr(item.filename, data)
     buf_out.seek(0)
     return buf_out.read()
 
