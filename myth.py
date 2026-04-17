@@ -188,6 +188,8 @@ def _read_excel_robust(file_bytes):
         pass
 
     # 2. openpyxl with stylesheet bug patched
+    OxlSet = None
+    _orig_set = None
     try:
         import openpyxl
         from openpyxl.descriptors.base import Set as OxlSet
@@ -208,7 +210,8 @@ def _read_excel_robust(file_bytes):
         OxlSet.__set__ = _orig_set  # restore
         return df
     except Exception:
-        OxlSet.__set__ = _orig_set  # always restore
+        if OxlSet is not None and _orig_set is not None:
+            OxlSet.__set__ = _orig_set  # always restore
         pass
 
     # 3. xlrd (for older .xls files)
