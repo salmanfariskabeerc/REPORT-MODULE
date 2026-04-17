@@ -176,12 +176,62 @@ def alert(msg, type_="blue", icon="ℹ"):
     </div>""", unsafe_allow_html=True)
 
 # ── Data Loader ───────────────────────────────────────────────────────────────
+def _read_excel_robust(file_bytes):
+    """Try every available engine until one works, patching openpyxl stylesheet bug."""
+    data = BytesIO(file_bytes)
+
+    # 1. calamine – fastest, no XML quirks
+    try:
+        import python_calamine  # noqa
+        return pd.read_excel(data, engine="calamine", header=0)
+    except Exception:
+        pass
+
+    # 2. openpyxl with stylesheet bug patched
+    try:
+        import openpyxl
+        from openpyxl.descriptors.base import Set as OxlSet
+
+        _orig_set = OxlSet.__set__
+
+        def _safe_set(self, instance, value):
+            try:
+                _orig_set(self, instance, value)
+            except ValueError:
+                # Silently skip invalid enum values (e.g. bad "vertical" alignment)
+                pass
+
+        OxlSet.__set__ = _safe_set
+
+        data.seek(0)
+        df = pd.read_excel(data, engine="openpyxl", header=0)
+        OxlSet.__set__ = _orig_set  # restore
+        return df
+    except Exception:
+        OxlSet.__set__ = _orig_set  # always restore
+        pass
+
+    # 3. xlrd (for older .xls files)
+    try:
+        data.seek(0)
+        return pd.read_excel(data, engine="xlrd", header=0)
+    except Exception:
+        pass
+
+    # 4. Last resort: odf
+    try:
+        data.seek(0)
+        return pd.read_excel(data, engine="odf", header=0)
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not read the uploaded file with any available engine. "
+            f"Please re-save the file as .xlsx from Excel and try again. Error: {e}"
+        )
+
+
 @st.cache_data
 def load_data(file_bytes):
-    try:
-        df_raw = pd.read_excel(BytesIO(file_bytes), engine="calamine", header=0)
-    except Exception:
-        df_raw = pd.read_excel(BytesIO(file_bytes), header=0)
+    df_raw = _read_excel_robust(file_bytes)
     header_row = 0
     for i in range(min(5, len(df_raw))):
         if "Order status" in df_raw.iloc[i].values:
