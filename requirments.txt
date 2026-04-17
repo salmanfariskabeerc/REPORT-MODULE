@@ -1,8 +1,8 @@
-streamlit>=1.32.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-python-calamine>=0.2.0
-reportlab>=4.0.0
-xlrd>=2.0.1
-numpy>=1.26.0
-matplotlib
+streamlit
+pandas
+openpyxl
+reportlab
+xlrd
+numpy
+python-calamine
+ 
