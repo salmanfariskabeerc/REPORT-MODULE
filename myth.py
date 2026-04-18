@@ -119,14 +119,18 @@ def _parse_stdlib(file_bytes):
     return pd.DataFrame(rows_out) if rows_out else pd.DataFrame()
 
 def get_area(name):
-    n=str(name).lower()
+    n = str(name).lower()
+
+    if "al madina hypermarket, dubai investments park 1" in n:
+        return "fida almadina"
+
     if "liwan" in n: return "Liwan"
     if "dip" in n or "investment park" in n: return "Dubai Investment Park"
     if "oud metha" in n: return "Oud Metha"
     if "naif" in n: return "Naif"
     if "muteena" in n: return "Al Muteena"
     if "hamriya" in n: return "Al Hamriya"
-    if "Al Madina Hypermarket, Dubai Investments Park 1" in n: return "fida almadina"
+
     return "Other"
 
 @st.cache_data(show_spinner=False)
