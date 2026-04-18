@@ -147,8 +147,7 @@ def get_area(name):
         return location if location else "Other"
     return " ".join(w[0].upper() + w[1:].lower() if w else "" for w in s.split())
 
-@st.cache_data(show_spinner=False)
-def load_data(file_bytes):
+def _do_load(file_bytes):
     df_raw=_parse_stdlib(file_bytes)
     hr=None
     for i in range(min(5,len(df_raw))):
@@ -169,6 +168,11 @@ def load_data(file_bytes):
     df["_hour"]=df["Order received at"].dt.hour
     df["_dow"]=df["Order received at"].dt.day_name()
     return df
+
+@st.cache_data(show_spinner=False)
+def load_data(file_hash: str, file_bytes: bytes):
+    """Cache keyed on md5 hash — different files always get fresh results."""
+    return _do_load(file_bytes)
 
 def sdiv(a,b,pct=False):
     if b==0: return 0
@@ -1180,7 +1184,10 @@ if uploaded is None:
 
 with st.spinner("Reading file..."):
     try:
-        df = load_data(uploaded.read())
+        import hashlib
+        _file_bytes = uploaded.read()
+        _file_hash  = hashlib.md5(_file_bytes).hexdigest()
+        df = load_data(_file_hash, _file_bytes)
     except Exception as e:
         st.error("Could not read file: {}".format(e)); st.stop()
 
