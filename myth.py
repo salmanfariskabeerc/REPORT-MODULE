@@ -82,8 +82,19 @@ NUMERIC_COLS=["Subtotal","Packaging charges","Minimum order value fee","Vendor R
     "Payout Amount","Total Discount","Total Voucher","Tax Amount"]
 DATE_COLS=["Order received at","Accepted at","Ready to pick up at","Rider near pickup at",
     "In delivery at","Delivered at","Cancelled at"]
-CLRS={"Liwan":"#f97316","Dubai Investment Park":"#3b82f6","Oud Metha":"#8b5cf6",
-      "Naif":"#ef4444","Al Muteena":"#10b981","Al Hamriya":"#f59e0b"}
+_PALETTE=["#f97316","#3b82f6","#8b5cf6","#ef4444","#10b981","#f59e0b",
+          "#06b6d4","#ec4899","#84cc16","#a855f7","#14b8a6","#f43f5e"]
+class _AutoCLRS(dict):
+    """Auto-assigns a color to any outlet area name that isn't predefined."""
+    def __missing__(self, key):
+        idx = len(self) % len(_PALETTE)
+        self[key] = _PALETTE[idx]
+        return self[key]
+CLRS = _AutoCLRS({
+    "Liwan":"#f97316","Dubai Investment Park":"#3b82f6","Oud Metha":"#8b5cf6",
+    "Naif":"#ef4444","Al Muteena":"#10b981","Al Hamriya":"#f59e0b",
+    "Dubai Investments Park 1":"#3b82f6",  # alternate name for DIP
+})
 
 # ─── Loader ────────────────────────────────────────────────────
 def _parse_stdlib(file_bytes):
@@ -119,20 +130,22 @@ def _parse_stdlib(file_bytes):
     return pd.DataFrame(rows_out) if rows_out else pd.DataFrame()
 
 def get_area(name):
-    n = str(name).lower()
-
-    # ✅ Detect Fida DIP 1 specifically
-    if "madina" in n and ("dip 1" in n or "investments park 1" in n):
-        return "fida almadina"
-
-    if "liwan" in n: return "Liwan"
-    if "dip" in n or "investment park" in n: return "Dubai Investment Park"
-    if "oud metha" in n: return "Oud Metha"
-    if "naif" in n: return "Naif"
-    if "muteena" in n: return "Al Muteena"
-    if "hamriya" in n: return "Al Hamriya"
-
-    return "Other"
+    """
+    Dynamically extract outlet location from any "Brand, Location" restaurant name.
+    Works for any new outlet — no code changes needed.
+      "AL MADINA HYPERMARKET, Liwan"                   -> "Liwan"
+      "Al Madina Hypermarket, Dubai Investments Park 1" -> "Dubai Investments Park 1"
+      "AL MADINA HYPERMARKET, Fida"                    -> "Fida"
+    """
+    s = str(name).strip()
+    if not s or s.lower() in ("nan", "none", ""):
+        return "Other"
+    if "," in s:
+        location = s.split(",", 1)[-1].strip()
+        # Normalize capitalization: title-case each word
+        location = " ".join(w[0].upper() + w[1:].lower() if w else "" for w in location.split())
+        return location if location else "Other"
+    return " ".join(w[0].upper() + w[1:].lower() if w else "" for w in s.split())
 
 @st.cache_data(show_spinner=False)
 def load_data(file_bytes):
@@ -370,8 +383,7 @@ def build_full_report(df, areas, title="Full Performance Report"):
     if pd.notna(date_min) and pd.notna(date_max):
         ds = date_min.strftime("%d %b %Y")+" – "+date_max.strftime("%d %b %Y")
 
-    CLRS = {"Liwan":"#f97316","Dubai Investment Park":"#3b82f6","Oud Metha":"#8b5cf6",
-            "Naif":"#ef4444","Al Muteena":"#10b981","Al Hamriya":"#f59e0b"}
+    # CLRS is the global auto-color dict — works for any outlet name
 
     def sdiv(a,b,pct=False):
         if b==0: return 0
