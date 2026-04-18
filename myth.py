@@ -161,8 +161,9 @@ def calc_quick(df_sub):
     total=len(df_sub); gmv=d["Subtotal"].sum()
     diff=(d["Delivered at"]-d["Order received at"]).dt.total_seconds()/60; diff=diff[diff>0]
     return {"total":total,"delivered":len(d),"cancelled":len(c),
-            "can_rate":sdiv(len(c),total,pct=True),"gmv":gmv,
-            "payout":d["Payout Amount"].sum(),"lost_gmv":c["Subtotal"].sum(),
+            "can_rate":sdiv(len(c),total,pct=True),
+            "del_rate":sdiv(len(d),total,pct=True),
+            "gmv":gmv,"payout":d["Payout Amount"].sum(),"lost_gmv":c["Subtotal"].sum(),
             "del_time":round(diff.mean(),1) if len(diff)>0 else None}
 
 def fp(v): return "{:.1f}%".format(v)
@@ -182,13 +183,13 @@ REPORT_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Inter',Arial,sans-serif;color:#1e293b;background:#f0f4f8;font-size:12px;line-height:1.55;}
+body{font-family:'Inter',Arial,sans-serif;color:#1e293b;background:#dde3ea;font-size:12px;line-height:1.55;}
 
 /* ── COVER ── */
 .cover{background:linear-gradient(160deg,#0f172a 0%,#1e293b 40%,#0c1a35 100%);
-  min-height:100vh;display:flex;flex-direction:column;justify-content:center;
+  display:flex;flex-direction:column;justify-content:center;
   align-items:center;text-align:center;padding:60px 40px;page-break-after:always;
-  position:relative;overflow:hidden;}
+  position:relative;overflow:hidden;margin-bottom:12px;}
 .cover::before{content:'';position:absolute;top:-40%;right:-20%;width:600px;height:600px;
   border-radius:50%;background:radial-gradient(circle,rgba(249,115,22,.12),transparent 70%);}
 .cover::after{content:'';position:absolute;bottom:-30%;left:-10%;width:500px;height:500px;
@@ -214,8 +215,9 @@ body{font-family:'Inter',Arial,sans-serif;color:#1e293b;background:#f0f4f8;font-
 .cpill{border-radius:8px;padding:7px 16px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,.1);}
 
 /* ── PAGES ── */
-.page{background:white;padding:32px 36px 52px;min-height:100vh;
-  page-break-after:always;position:relative;}
+.page{background:white;padding:36px 40px 56px;
+  page-break-after:always;position:relative;
+  margin-bottom:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}
 .page:last-child{page-break-after:auto;}
 .ph{display:flex;justify-content:space-between;align-items:flex-start;
   margin-bottom:22px;padding-bottom:14px;border-bottom:2px solid #f8fafc;}
@@ -348,7 +350,8 @@ td.re{color:#991b1b;font-weight:600;}td.am{color:#92400e;font-weight:600;}
 .pf{position:absolute;bottom:16px;left:36px;right:36px;display:flex;justify-content:space-between;
   font-size:9px;color:#cbd5e1;border-top:1px solid #f8fafc;padding-top:8px;}
 
-@media print{body{background:white;}.page,.cover{box-shadow:none;}}
+@media print{body{background:white;}.page,.cover{box-shadow:none;margin-bottom:0;}}
+@media screen{.page,.cover{max-width:960px;margin-left:auto;margin-right:auto;}}
 </style>
 """
 
@@ -1094,14 +1097,17 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
-    st.markdown("""<div class="lcard">
-        <div class="llogo">📊</div>
-        <div class="ltitle">Al Madina Reports</div>
-        <div class="lsub">Confidential reporting platform — authorised access only</div>
-    </div>""", unsafe_allow_html=True)
-    col = st.columns([1,3,1])[1]
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col = st.columns([1,2,1])[1]
     with col:
+        st.markdown("""<div style="background:white;border-radius:24px;padding:44px 40px;
+            box-shadow:0 24px 80px rgba(0,0,0,.1);border:1px solid #f1f5f9;text-align:center;">
+            <div style="width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,#f97316,#dc2626);
+                display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 18px;">📊</div>
+            <div style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:4px;letter-spacing:-.02em;">Al Madina Reports</div>
+            <div style="font-size:12px;color:#94a3b8;margin-bottom:28px;">Confidential reporting platform</div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:-10px;'>", unsafe_allow_html=True)
         pwd = st.text_input("", type="password", placeholder="Enter password…", label_visibility="collapsed", key="pwd_input")
         if st.button("Sign In →", use_container_width=True, key="signin"):
             if pwd == PASSWORD:
@@ -1109,7 +1115,7 @@ if not st.session_state.auth:
                 st.rerun()
             else:
                 st.error("Incorrect password. Please try again.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # ─── MAIN APP ─────────────────────────────────────────────────
