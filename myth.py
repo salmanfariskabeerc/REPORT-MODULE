@@ -121,7 +121,8 @@ def _parse_stdlib(file_bytes):
 def get_area(name):
     n = str(name).lower()
 
-    if "al madina hypermarket, dubai investments park 1" in n:
+    # ✅ Detect Fida DIP 1 specifically
+    if "madina" in n and ("dip 1" in n or "investments park 1" in n):
         return "fida almadina"
 
     if "liwan" in n: return "Liwan"
