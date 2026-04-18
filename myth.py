@@ -126,6 +126,7 @@ def get_area(name):
     if "naif" in n: return "Naif"
     if "muteena" in n: return "Al Muteena"
     if "hamriya" in n: return "Al Hamriya"
+    if "Al Madina Hypermarket, Dubai Investments Park 1" in n: return "fida almadina"
     return "Other"
 
 @st.cache_data(show_spinner=False)
